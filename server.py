@@ -55,7 +55,12 @@ def _request(method: str, path: str, **kwargs):
                 body = resp.json()
             except Exception:
                 body = resp.text
-        elif "application/pdf" in ct or resp.headers.get("content-disposition"):
+        elif (
+            "application/pdf" in ct
+            or "application/zip" in ct
+            or "application/octet-stream" in ct
+            or resp.headers.get("content-disposition")
+        ):
             body = resp.content
         else:
             try:
@@ -85,6 +90,33 @@ def _check_config() -> str | None:
 def _safe_filename(name: str) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
     return name or "document"
+
+
+def _save_binary(content: bytes, output_path: str | None, default_name: str) -> Path:
+    """Salva bytes su disco: usa output_path se fornito, altrimenti HEU_DOWNLOAD_DIR/default_name."""
+    if output_path:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        out = DOWNLOAD_DIR / default_name
+    out.write_bytes(content)
+    return out
+
+
+def _download_binary_to_disk(path: str, output_path: str | None, default_name: str, what: str) -> list[TextContent]:
+    """GET binario dall'API e salvataggio su disco; ritorna path e dimensione."""
+    status, body, headers = _request("GET", path, timeout=DOWNLOAD_TIMEOUT)
+    if status != 200:
+        return _err(status, body if not isinstance(body, (bytes, bytearray)) else body[:200].decode(errors="replace"))
+    if not isinstance(body, (bytes, bytearray)):
+        return _err(status, body, hint=f"Atteso {what} binario, ricevuto altro contenuto.")
+    out = _save_binary(bytes(body), output_path, default_name)
+    return _ok({
+        "saved_to": str(out.resolve()),
+        "size_bytes": len(body),
+        "content_disposition": headers.get("content-disposition"),
+    })
 
 
 DEFAULT_MAX_PAGES = 100
@@ -284,6 +316,61 @@ async def list_tools():
             "text_value": {"type": ["string", "null"], "description": "Valore testuale da inserire"},
         },
         "required": ["source_id"],
+    }
+
+    template_signer_schema = {
+        "type": "object",
+        "properties": {
+            "source_id": {"type": "string", "description": "Chiave scelta da te per collegare i placeholder a questo firmatario (es. 'signer-1'). Unica nella richiesta."},
+            "full_name": {"type": "string", "description": "Nome completo del firmatario"},
+        },
+        "required": ["source_id", "full_name"],
+    }
+
+    template_placeholder_schema = {
+        "type": "object",
+        "properties": {
+            "signer_source_id": {"type": "string", "description": "source_id del firmatario a cui appartiene il campo"},
+            "type": {
+                "type": "string",
+                "enum": ["text", "signature", "initials", "checkbox_optional", "checkbox_required"],
+                "description": "Tipo di campo",
+            },
+            "position_x": {"type": "number", "description": "Posizione orizzontale in % della larghezza pagina (0-100 esclusi), origine in basso a sinistra"},
+            "position_y": {"type": "number", "description": "Posizione verticale in % dell'altezza pagina (0-100 esclusi), origine in basso a sinistra"},
+            "page_number": {"type": "number", "description": "Numero pagina (parte da 1)"},
+            "text_label": {"type": "string", "description": "Etichetta del campo. Richiesta solo per type=text."},
+        },
+        "required": ["signer_source_id", "type", "position_x", "position_y", "page_number"],
+    }
+
+    upload_signer_schema = {
+        "type": "object",
+        "properties": {
+            "source_id": {"type": "string", "description": "Chiave scelta da te per collegare i placeholder a questo firmatario (es. 'signer-1')"},
+            "full_name": {"type": "string", "description": "Nome completo del firmatario"},
+            "email": {"type": "string", "format": "email", "description": "Email del firmatario (riceverà l'invito a firmare)"},
+        },
+        "required": ["source_id", "full_name", "email"],
+    }
+
+    upload_placeholder_schema = {
+        "type": "object",
+        "properties": {
+            "signer_source_id": {"type": "string", "description": "source_id del firmatario a cui appartiene il campo"},
+            "type": {
+                "type": "string",
+                "enum": ["text", "signature", "initials", "checkbox_optional", "checkbox_required"],
+                "description": "Tipo di campo",
+            },
+            "position_x": {"type": "number", "description": "Posizione orizzontale in % (0-100 esclusi), origine in basso a sinistra"},
+            "position_y": {"type": "number", "description": "Posizione verticale in % (0-100 esclusi), origine in basso a sinistra"},
+            "page_number": {"type": "number", "description": "Numero pagina (parte da 1)"},
+            "text_label": {"type": "string", "description": "Etichetta (per type=text)"},
+            "text_value": {"type": "string", "description": "Valore precompilato (opzionale)"},
+            "is_checked": {"type": "boolean", "description": "Per checkbox: precompilato spuntato (opzionale)"},
+        },
+        "required": ["signer_source_id", "type", "position_x", "position_y", "page_number"],
     }
 
     return [
@@ -587,10 +674,9 @@ async def list_tools():
             name="read_pdf_document",
             description=(
                 "Legge il contenuto testuale di un PDF caricato senza salvarlo su disco. "
-                "Estrae il testo dal PDF e lo restituisce direttamente nella risposta. "
-                "Default: tutte le pagine fino a un limite di 100. "
-                "Nota: usa lo stesso endpoint di download dei documenti HEU; se l'API non lo supporta "
-                "per i PDF caricati, restituirà un errore esplicito."
+                "Scarica il PDF (incluso quello firmato, se disponibile), ne estrae il testo "
+                "e lo restituisce direttamente nella risposta. "
+                "Default: tutte le pagine fino a un limite di 100."
             ),
             inputSchema={
                 "type": "object",
@@ -614,6 +700,162 @@ async def list_tools():
                 "type": "object",
                 "properties": {
                     "document_id": {"type": "string", "description": "ID del PDF"},
+                },
+                "required": ["document_id"],
+            },
+        ),
+        Tool(
+            name="download_pdf_document",
+            description=(
+                "Scarica il PDF di un documento caricato (versione firmata se disponibile) "
+                "e lo salva localmente. Ritorna il path del file."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del PDF"},
+                    "output_path": {"type": "string", "description": "Path output personalizzato (opzionale, default: HEU_DOWNLOAD_DIR/heu_pdf_<id>.pdf)"},
+                },
+                "required": ["document_id"],
+            },
+        ),
+        Tool(
+            name="download_pdf_audit_trail",
+            description=(
+                "Scarica l'audit trail (registro delle attività di firma) di un PDF "
+                "e lo salva localmente. Ritorna il path del file."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del PDF"},
+                    "output_path": {"type": "string", "description": "Path output personalizzato (opzionale)"},
+                },
+                "required": ["document_id"],
+            },
+        ),
+        Tool(
+            name="download_pdf_bundle",
+            description=(
+                "Scarica il bundle ZIP completo di un PDF (documento + audit trail + artefatti FES) "
+                "e lo salva localmente. Ritorna il path del file. Utile per archiviazione legale."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del PDF"},
+                    "output_path": {"type": "string", "description": "Path output personalizzato (opzionale)"},
+                },
+                "required": ["document_id"],
+            },
+        ),
+        Tool(
+            name="create_pdf_template",
+            description=(
+                "Crea un template PDF riutilizzabile caricando un file PDF locale (max 5 MB) "
+                "con firmatari e placeholder. Ritorna l'ID del nuovo template, utilizzabile come "
+                "source_document_id in create_pdf_document. Le posizioni dei placeholder sono in "
+                "percentuale (0-100) con origine in basso a sinistra. PDF ruotati vengono rifiutati. "
+                "IMPORTANTE: chiedere conferma all'utente prima di eseguire."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path locale del file PDF da caricare (max 5 MB)"},
+                    "document_name": {"type": "string", "description": "Nome del template"},
+                    "signers": {"type": "array", "items": template_signer_schema, "description": "Firmatari del template (senza email)"},
+                    "placeholders": {"type": "array", "items": template_placeholder_schema, "description": "Campi firma/testo/checkbox posizionati sul PDF"},
+                },
+                "required": ["file_path", "document_name", "signers", "placeholders"],
+            },
+        ),
+        Tool(
+            name="create_pdf_document_from_upload",
+            description=(
+                "Crea e invia direttamente un PDF firmabile caricando un file locale (max 5 MB), "
+                "senza passare da un template. Richiede firmatari completi di email, oggetto/corpo "
+                "email e layout placeholder (opzionalmente precompilati). Il documento viene creato "
+                "in stato 'to_sign' e i firmatari ricevono subito l'email. "
+                "Con signature_type='fea' servono crediti FEA sufficienti. "
+                "IMPORTANTE: chiedere conferma all'utente prima di eseguire."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path locale del file PDF da caricare (max 5 MB)"},
+                    "document_name": {"type": "string", "description": "Nome del documento"},
+                    "signature_type": {"type": "string", "enum": ["fes", "fea"], "description": "Tipo firma. Default: fes"},
+                    "email_subject": {"type": "string", "description": "Oggetto email di invito alla firma"},
+                    "email_body": {"type": "string", "description": "Corpo email di invito alla firma"},
+                    "signers": {"type": "array", "items": upload_signer_schema, "description": "Firmatari (con email)"},
+                    "placeholders": {"type": "array", "items": upload_placeholder_schema, "description": "Campi posizionati sul PDF, opzionalmente precompilati"},
+                },
+                "required": ["file_path", "document_name", "email_subject", "email_body", "signers", "placeholders"],
+            },
+        ),
+        Tool(
+            name="preview_pdf_template",
+            description=(
+                "Scarica un'anteprima annotata di un template PDF: ogni placeholder è disegnato "
+                "come un riquadro etichettato con tipo e firmatario. Utile per verificare il "
+                "posizionamento dei campi prima di usare il template. Salva il PDF localmente e "
+                "ritorna il path. Solo il proprietario del template può usarlo."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del template PDF"},
+                    "output_path": {"type": "string", "description": "Path output personalizzato (opzionale)"},
+                },
+                "required": ["document_id"],
+            },
+        ),
+        Tool(
+            name="update_pdf_template",
+            description=(
+                "Sostituisce integralmente firmatari e placeholder di un template PDF esistente "
+                "(l'ID template resta lo stesso). Solo il proprietario; il documento deve essere "
+                "di tipo 'template'. Placeholder omessi o [] cancella tutti i campi. "
+                "IMPORTANTE: chiedere conferma all'utente prima di eseguire."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del template PDF"},
+                    "document_name": {"type": "string", "description": "Nuovo nome del template (opzionale, aggiornato solo se fornito)"},
+                    "signers": {"type": "array", "items": template_signer_schema, "description": "Set completo sostitutivo dei firmatari (richiesto)"},
+                    "placeholders": {"type": "array", "items": template_placeholder_schema, "description": "Set completo sostitutivo dei placeholder (ometti o [] per cancellarli tutti)"},
+                },
+                "required": ["document_id", "signers"],
+            },
+        ),
+        Tool(
+            name="delete_pdf_template",
+            description=(
+                "Elimina (nasconde) un template PDF da tutti gli elenchi. I template non vengono "
+                "mai firmati quindi l'eliminazione è sempre consentita. "
+                "IMPORTANTE: chiedere SEMPRE conferma esplicita all'utente prima di eseguire."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del template PDF da eliminare"},
+                },
+                "required": ["document_id"],
+            },
+        ),
+        Tool(
+            name="cancel_pdf_document",
+            description=(
+                "Annulla una richiesta di firma inviata: nasconde il PDF da tutti gli elenchi e "
+                "invalida l'accesso alla firma, così i firmatari in attesa non possono più firmare. "
+                "Viene rifiutato con 409 se il documento ha già attività di firma. "
+                "IMPORTANTE: chiedere SEMPRE conferma esplicita all'utente prima di eseguire."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "ID del documento PDF da annullare"},
                 },
                 "required": ["document_id"],
             },
@@ -772,8 +1014,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "has_signed": s.get("has_signed"),
                     })
 
-            # 2) PDF body text via the documents/{id}/download endpoint
-            status, body, _h = _request("POST", f"/documents/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
+            # 2) PDF body text via the native pdfs/{id}/download endpoint
+            status, body, _h = _request("GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
             extracted = None
             text_warning = None
             pdf_result = None
@@ -787,8 +1029,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     text_warning = f"Errore estrazione testo: {e}"
             else:
                 text_warning = (
-                    "Download del contenuto del PDF non disponibile (l'API HEU per i PDF caricati "
-                    "potrebbe non supportare il download diretto). Restituiti solo i metadati."
+                    f"Download del contenuto del PDF fallito (HTTP {status}). "
+                    "Restituiti solo i metadati."
                 )
 
             payload = {
@@ -841,20 +1083,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "read_pdf_document":
             doc_id = arguments["document_id"]
-            # Try the documents/{id}/download endpoint (HEU may use a unified download path)
             status, body, _headers = _request(
-                "POST", f"/documents/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT
+                "GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT
             )
             if status != 200:
-                return _err(
-                    status,
-                    body,
-                    hint=(
-                        "Il download diretto del contenuto dei PDF caricati potrebbe non essere "
-                        "supportato dall'API HEU. Se il problema persiste, segnala il caso d'uso "
-                        "al team HEU per richiedere un endpoint dedicato."
-                    ),
-                )
+                return _err(status, body)
             if not isinstance(body, (bytes, bytearray)):
                 return _err(status, body, hint="Atteso PDF binario, ricevuto altro contenuto.")
             try:
@@ -958,6 +1191,132 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             doc_id = arguments["document_id"]
             status, body, _ = _request("POST", f"/pdfs/{doc_id}/signatures/prompts")
             return _ok(body) if status in (200, 201) else _err(status, body)
+
+        if name == "download_pdf_document":
+            doc_id = arguments["document_id"]
+            return _download_binary_to_disk(
+                f"/pdfs/{doc_id}/download",
+                arguments.get("output_path"),
+                f"heu_pdf_{_safe_filename(doc_id)}.pdf",
+                "PDF",
+            )
+
+        if name == "download_pdf_audit_trail":
+            doc_id = arguments["document_id"]
+            return _download_binary_to_disk(
+                f"/pdfs/{doc_id}/audit-trail",
+                arguments.get("output_path"),
+                f"heu_pdf_{_safe_filename(doc_id)}_audit_trail.pdf",
+                "PDF audit trail",
+            )
+
+        if name == "download_pdf_bundle":
+            doc_id = arguments["document_id"]
+            return _download_binary_to_disk(
+                f"/pdfs/{doc_id}/bundle",
+                arguments.get("output_path"),
+                f"heu_pdf_{_safe_filename(doc_id)}_bundle.zip",
+                "bundle ZIP",
+            )
+
+        if name == "create_pdf_template":
+            file_path = Path(arguments["file_path"])
+            if not file_path.is_file():
+                return _err(400, f"File non trovato: {file_path}")
+            if file_path.stat().st_size > 5 * 1024 * 1024:
+                return _err(400, f"File troppo grande ({file_path.stat().st_size} byte): il limite è 5 MB.")
+            data_payload = {
+                "documentName": arguments["document_name"],
+                "signers": arguments["signers"],
+                "placeholders": arguments["placeholders"],
+            }
+            status, body, _ = _request(
+                "POST",
+                "/pdfs/templates",
+                files={"file": (file_path.name, file_path.read_bytes(), "application/pdf")},
+                data={"data": json.dumps(data_payload, ensure_ascii=False)},
+                timeout=DOWNLOAD_TIMEOUT,
+            )
+            if status in (200, 201):
+                return _ok(body)
+            hint = None
+            if status == 400:
+                hint = "Verifica che il PDF non sia ruotato (rifiutato) e che i placeholder siano validi (posizioni 0-100 esclusi, signer_source_id corrispondenti)."
+            return _err(status, body, hint=hint)
+
+        if name == "create_pdf_document_from_upload":
+            file_path = Path(arguments["file_path"])
+            if not file_path.is_file():
+                return _err(400, f"File non trovato: {file_path}")
+            if file_path.stat().st_size > 5 * 1024 * 1024:
+                return _err(400, f"File troppo grande ({file_path.stat().st_size} byte): il limite è 5 MB.")
+            data_payload = {
+                "documentName": arguments["document_name"],
+                "email": {
+                    "subject": arguments["email_subject"],
+                    "body": arguments["email_body"],
+                },
+                "signers": arguments["signers"],
+                "placeholders": arguments["placeholders"],
+            }
+            if "signature_type" in arguments and arguments["signature_type"]:
+                data_payload["signature_type"] = arguments["signature_type"]
+            status, body, _ = _request(
+                "POST",
+                "/pdfs/documents",
+                files={"file": (file_path.name, file_path.read_bytes(), "application/pdf")},
+                data={"data": json.dumps(data_payload, ensure_ascii=False)},
+                timeout=DOWNLOAD_TIMEOUT,
+            )
+            if status in (200, 201):
+                return _ok(body)
+            hint = None
+            if status == 422:
+                hint = "Crediti FEA insufficienti per il numero di firmatari."
+            elif status == 400:
+                hint = "Verifica che il PDF non sia ruotato e che signers/placeholders siano coerenti."
+            return _err(status, body, hint=hint)
+
+        if name == "preview_pdf_template":
+            doc_id = arguments["document_id"]
+            return _download_binary_to_disk(
+                f"/pdfs/templates/{doc_id}/preview",
+                arguments.get("output_path"),
+                f"heu_template_{_safe_filename(doc_id)}_preview.pdf",
+                "anteprima PDF",
+            )
+
+        if name == "update_pdf_template":
+            doc_id = arguments["document_id"]
+            payload = {"signers": arguments["signers"]}
+            if "document_name" in arguments and arguments["document_name"]:
+                payload["documentName"] = arguments["document_name"]
+            if "placeholders" in arguments and arguments["placeholders"] is not None:
+                payload["placeholders"] = arguments["placeholders"]
+            status, body, _ = _request("PUT", f"/pdfs/templates/{doc_id}", json=payload)
+            if status == 200:
+                return _ok(body)
+            hint = None
+            if status == 400:
+                hint = "Il documento potrebbe non essere di tipo 'template', o i dati non sono validi."
+            return _err(status, body, hint=hint)
+
+        if name == "delete_pdf_template":
+            doc_id = arguments["document_id"]
+            status, body, _ = _request("DELETE", f"/pdfs/templates/{doc_id}")
+            if status == 204:
+                return _ok({"deleted": True, "template_id": doc_id})
+            return _err(status, body)
+
+        if name == "cancel_pdf_document":
+            doc_id = arguments["document_id"]
+            status, body, _ = _request("DELETE", f"/pdfs/documents/{doc_id}")
+            if status == 204:
+                return _ok({"cancelled": True, "document_id": doc_id, "note": "Richiesta di firma annullata: i firmatari in attesa non possono più firmare."})
+            hint = None
+            if status == 409:
+                hint = "Il documento ha già attività di firma e non può essere annullato."
+            return _err(status, body, hint=hint)
 
         return [TextContent(type="text", text=f"Tool sconosciuto: {name}")]
 

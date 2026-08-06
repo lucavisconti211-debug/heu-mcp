@@ -10,11 +10,13 @@ MCP server (Model Context Protocol) per integrare l'[API HEU Legal](https://heul
 
 ## Funzionalità
 
-18 tool che coprono l'intera API HEU v1 più lettura contenuto e estrazione strutturata delle parti:
+27 tool che coprono l'intera API HEU v1 più lettura contenuto e estrazione strutturata delle parti:
 
 **Documenti nativi HEU** — `list_heu_documents`, `get_heu_document`, `list_heu_document_placeholders`, `create_heu_document`, `prompt_heu_document_signature`, `extract_heu_document_parties`, `read_heu_document`, `download_heu_document_pdf`
 
-**PDF caricati** — `list_pdf_documents`, `get_pdf_document`, `list_pdf_document_signers`, `list_pdf_document_signer_placeholders`, `list_pdf_document_placeholders`, `create_pdf_document`, `extract_pdf_document_parties`, `read_pdf_document`, `prompt_pdf_document_signature`
+**PDF caricati** — `list_pdf_documents`, `get_pdf_document`, `list_pdf_document_signers`, `list_pdf_document_signer_placeholders`, `list_pdf_document_placeholders`, `create_pdf_document`, `extract_pdf_document_parties`, `read_pdf_document`, `prompt_pdf_document_signature`, `download_pdf_document`, `download_pdf_audit_trail`, `download_pdf_bundle`, `cancel_pdf_document`
+
+**Template PDF** — `create_pdf_template` (da file locale), `create_pdf_document_from_upload` (invio diretto da file), `preview_pdf_template`, `update_pdf_template`, `delete_pdf_template`
 
 **Health** — `get_heu_health`
 

@@ -5,6 +5,24 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-06
+
+### Added
+Supporto ai nuovi endpoint dell'API HEU (9 nuovi tool, totale 27):
+- `download_pdf_document` — scarica il PDF di un documento caricato (versione firmata se disponibile).
+- `download_pdf_audit_trail` — scarica l'audit trail PDF.
+- `download_pdf_bundle` — scarica il bundle ZIP (PDF + audit trail + artefatti FES) per archiviazione legale.
+- `create_pdf_template` — crea un template PDF caricando un file locale (max 5 MB) con firmatari e placeholder posizionati in percentuale.
+- `create_pdf_document_from_upload` — crea e invia direttamente un PDF firmabile da file locale, senza passare da un template.
+- `preview_pdf_template` — scarica un'anteprima annotata del template con i placeholder disegnati.
+- `update_pdf_template` — sostituisce firmatari/placeholder di un template esistente.
+- `delete_pdf_template` — elimina un template.
+- `cancel_pdf_document` — annulla una richiesta di firma inviata (rifiutato con 409 se c'è già attività di firma).
+
+### Changed
+- `read_pdf_document` e `extract_pdf_document_parties` ora usano l'endpoint nativo `GET /pdfs/{id}/download` (prima ripiegavano su quello dei documenti HEU): funzionano su tutti i PDF caricati, inclusi quelli firmati.
+- Il downloader interno riconosce anche `application/zip` e `application/octet-stream`.
+
 ## [0.1.7] - 2026-05-04
 
 ### Changed
