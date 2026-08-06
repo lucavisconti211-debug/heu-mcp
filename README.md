@@ -18,6 +18,7 @@ MCP server (Model Context Protocol) che collega l'[API HEU Legal](https://heuleg
 | 📄 Vedere i miei documenti e templates | `list_heu_documents`, `list_pdf_documents` |
 | ✍️ Mandare un contratto in firma da un template | `create_heu_document`, `create_pdf_document` |
 | 🚀 Mandare in firma un PDF che ho sul computer, senza passare dalla piattaforma | `create_pdf_document_from_upload` |
+| 🤖 Far mappare i campi firma **all'AI** (analizza il PDF, posiziona i campi, invia) | `locate_pdf_text` + `create_pdf_document_from_upload` |
 | 🔔 Sollecitare chi non ha ancora firmato | `prompt_heu_document_signature`, `prompt_pdf_document_signature` |
 | 👀 Far *leggere* un contratto all'AI (riassunti, clausole, confronti) senza scaricarlo | `read_heu_document`, `read_pdf_document` |
 | 🪪 Estrarre i dati delle parti (P.IVA, codice fiscale, SDI, PEC, indirizzi) | `extract_heu_document_parties`, `extract_pdf_document_parties` |
@@ -111,7 +112,7 @@ claude mcp add heu heu-mcp -e HEU_API_KEY=la_tua_api_key_qui
 
 ---
 
-## Riferimento completo dei tool (27)
+## Riferimento completo dei tool (28)
 
 ### 🩺 Health
 
@@ -156,6 +157,7 @@ claude mcp add heu heu-mcp -e HEU_API_KEY=la_tua_api_key_qui
 |---|---|---|
 | `create_pdf_template` ✋ | `file_path` (PDF locale ≤ 5 MB), `document_name`, `signers` (`source_id`, `full_name`), `placeholders` (tipo, posizione %, pagina) | Crea un **template riutilizzabile** caricando un PDF dal computer. L'ID restituito si usa come `source_document_id` in `create_pdf_document` |
 | `create_pdf_document_from_upload` ✋ | `file_path`, `document_name`, `email_subject`, `email_body`, `signers` (con email), `placeholders`, `signature_type` | **Scorciatoia completa**: carica un PDF e lo manda subito in firma, senza creare prima il template. Il documento nasce `to_sign` e i firmatari ricevono l'email immediatamente |
+| `locate_pdf_text` | `file_path` **oppure** `document_id`, `search_terms` (default: parole chiave firma), `pages`, `include_all_lines` | **Trova le coordinate di testi nel PDF** (in %, origine in basso a sinistra — lo stesso sistema dei placeholder). È il tool che permette all'AI di posizionare i campi da sola: cerca "Firma", i nomi delle parti o qualsiasi ancora, e ottiene pagina + posizione di ognuna |
 | `preview_pdf_template` | `document_id`, `output_path` | Scarica un'**anteprima annotata**: ogni campo è disegnato come riquadro etichettato con tipo e firmatario. Per verificare le posizioni prima dell'invio |
 | `update_pdf_template` ✋ | `document_id`, `signers` (set completo sostitutivo), `placeholders` (idem; `[]` li cancella tutti), `document_name` | Sostituzione integrale di firmatari e campi di un template (l'ID resta invariato). Solo il proprietario |
 | `delete_pdf_template` ✋ | `document_id` | Elimina (nasconde) il template da tutti gli elenchi |
@@ -173,6 +175,21 @@ claude mcp add heu heu-mcp -e HEU_API_KEY=la_tua_api_key_qui
 ---
 
 ## Flussi di lavoro tipici
+
+### 0. Invio in firma "intelligente": l'AI mappa i campi da sola
+
+> *"Prendi `/Users/me/Desktop/Contratto.pdf`, trova dove devono firmare le parti e mandalo a cliente@example.com e fornitore@example.com."*
+
+Cosa succede dietro le quinte:
+
+1. **`locate_pdf_text`** analizza il PDF e trova le ancore: le righe "Firma del Cliente" / "Firma del Fornitore" (o i nomi delle parti) con le loro coordinate esatte in percentuale.
+2. Claude **propone la mappatura**: *"Metto il campo firma del cliente a pagina 4, sopra l'etichetta 'Firma del Cliente' (x 17%, y 14%), e quello del fornitore accanto (x 50%, y 14%). Confermi?"*
+3. Alla conferma, **`create_pdf_document_from_upload`** carica il PDF con i placeholder posizionati e invia le email di firma.
+4. (Opzionale) **`preview_pdf_template`** per un controllo visivo se si è passati da un template.
+
+Le coordinate restituite da `locate_pdf_text` sono già nel sistema dei placeholder HEU (percentuale, origine in basso a sinistra): nessuna conversione necessaria. Per layout complessi si può chiedere l'intera mappa della pagina con `include_all_lines=true`, o cercare termini specifici (`search_terms=["Il Committente", "Il Prestatore"]`).
+
+⚠️ Limite: funziona sui PDF con testo. Le scansioni senza OCR non hanno testo estraibile — in quel caso indicare le posizioni manualmente.
 
 ### 1. Mandare in firma un PDF dal computer (tutto via chat)
 

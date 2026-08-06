@@ -5,6 +5,13 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-06
+
+### Added
+- Nuovo tool `locate_pdf_text` (28° tool): trova la posizione esatta di testi dentro un PDF — locale (`file_path`) o già caricato su HEU (`document_id`) — e la restituisce in percentuale con origine in basso a sinistra, lo stesso sistema di coordinate dei placeholder HEU. Abilita il flusso **"invio in firma intelligente"**: l'AI analizza il PDF, propone la mappatura dei campi firma vicino alle ancore trovate ("Firma", nomi delle parti, ...), l'utente conferma e il documento parte con `create_pdf_document_from_upload`.
+- Parole chiave di default per la ricerca: "firma", "sottoscri", "signature", "per accettazione", "timbro", "luogo e data". Supporto a termini custom (es. i nomi delle parti) e a `include_all_lines=true` per ottenere l'intera mappa testuale della pagina.
+- Nuova dipendenza: `pdfminer.six` per l'estrazione posizionale affidabile (il visitor di pypdf ha coordinate inaffidabili su alcuni PDF).
+
 ## [0.2.0] - 2026-08-06
 
 ### Added

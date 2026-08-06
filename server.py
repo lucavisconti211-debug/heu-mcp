@@ -256,6 +256,60 @@ def _parse_pages_spec(spec: str, total_pages: int) -> list[int]:
     return sorted(pages)
 
 
+DEFAULT_SIGNATURE_KEYWORDS = [
+    "firma",
+    "sottoscri",
+    "signature",
+    "per accettazione",
+    "timbro",
+    "luogo e data",
+]
+
+
+def _extract_text_lines_with_positions(pdf_bytes: bytes, pages_spec: str | None) -> dict:
+    """Estrae le righe di testo di un PDF con le loro coordinate (via pdfminer.six).
+
+    Ritorna page dims e righe: coordinate in punti PDF (origine in basso a sinistra)
+    e in percentuale della pagina, compatibili con i placeholder HEU."""
+    from pdfminer.high_level import extract_pages
+    from pdfminer.layout import LTTextContainer, LTTextLine
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    total = len(reader.pages)
+    wanted = _parse_pages_spec(pages_spec, total) if pages_spec else list(range(1, total + 1))
+
+    pages_out = []
+    layouts = extract_pages(io.BytesIO(pdf_bytes), page_numbers=[p - 1 for p in wanted])
+    for page_num, layout in zip(wanted, layouts):
+        width = float(layout.width)
+        height = float(layout.height)
+        lines: list[dict] = []
+        for element in layout:
+            if not isinstance(element, LTTextContainer):
+                continue
+            for line in element:
+                if not isinstance(line, LTTextLine):
+                    continue
+                text = line.get_text().strip()
+                if not text:
+                    continue
+                x0, y0, _x1, _y1 = line.bbox
+                lines.append({
+                    "text": text,
+                    "x_points": round(x0, 1),
+                    "y_points": round(y0, 1),
+                })
+        lines.sort(key=lambda l: (-l["y_points"], l["x_points"]))
+        pages_out.append({
+            "page_number": page_num,
+            "width_points": round(width, 2),
+            "height_points": round(height, 2),
+            "lines": lines,
+        })
+
+    return {"pages_total": total, "pages": pages_out}
+
+
 def _extract_pdf_text(pdf_bytes: bytes, pages_spec: str | None, max_pages: int = DEFAULT_MAX_PAGES) -> dict:
     """Extract text from PDF bytes. Returns dict with text + metadata."""
     reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -777,7 +831,10 @@ async def list_tools():
                 "email e layout placeholder (opzionalmente precompilati). Il documento viene creato "
                 "in stato 'to_sign' e i firmatari ricevono subito l'email. "
                 "Con signature_type='fea' servono crediti FEA sufficienti. "
-                "IMPORTANTE: chiedere conferma all'utente prima di eseguire."
+                "SUGGERIMENTO: per posizionare i campi automaticamente, usa PRIMA locate_pdf_text "
+                "per trovare le coordinate di ancore come 'Firma', i nomi delle parti, ecc. "
+                "IMPORTANTE: chiedere conferma all'utente (mostrando la mappatura campi proposta) "
+                "prima di eseguire."
             ),
             inputSchema={
                 "type": "object",
@@ -791,6 +848,39 @@ async def list_tools():
                     "placeholders": {"type": "array", "items": upload_placeholder_schema, "description": "Campi posizionati sul PDF, opzionalmente precompilati"},
                 },
                 "required": ["file_path", "document_name", "email_subject", "email_body", "signers", "placeholders"],
+            },
+        ),
+        Tool(
+            name="locate_pdf_text",
+            description=(
+                "Trova la posizione esatta di testi dentro un PDF, per posizionare i placeholder "
+                "di firma automaticamente. Cerca i termini indicati (default: 'firma', 'sottoscri', "
+                "'signature', 'per accettazione', 'timbro', 'luogo e data') e ritorna per ogni "
+                "occorrenza: pagina, coordinate in percentuale (position_x/position_y, origine in "
+                "basso a sinistra — lo stesso sistema dei placeholder HEU) e il testo della riga. "
+                "Ritorna anche le dimensioni pagina. Flusso tipico: locate_pdf_text -> proponi la "
+                "mappatura campi all'utente -> create_pdf_document_from_upload o create_pdf_template. "
+                "Suggerimento: il campo firma va di solito posizionato leggermente sopra o a destra "
+                "dell'etichetta trovata (es. y +2-4 punti percentuali rispetto alla riga 'Firma'). "
+                "Funziona su un file locale (file_path) o su un PDF già caricato su HEU (document_id). "
+                "PDF scansionati senza testo restituiscono zero righe."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path locale del PDF da analizzare (alternativo a document_id)"},
+                    "document_id": {"type": "string", "description": "ID di un PDF già caricato su HEU (alternativo a file_path)"},
+                    "search_terms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Testi da cercare (case-insensitive, match parziale). Default: parole chiave di firma. Usa i nomi delle parti per trovare dove posizionare i campi di ciascun firmatario.",
+                    },
+                    "pages": {"type": "string", "description": "Range pagine da analizzare: '1-3', '5', '1,3,5-7'. Default: tutte."},
+                    "include_all_lines": {
+                        "type": "boolean",
+                        "description": "Se true ritorna TUTTE le righe con coordinate (non solo i match): utile per layout complessi. Default: false.",
+                    },
+                },
             },
         ),
         Tool(
@@ -1276,6 +1366,83 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             elif status == 400:
                 hint = "Verifica che il PDF non sia ruotato e che signers/placeholders siano coerenti."
             return _err(status, body, hint=hint)
+
+        if name == "locate_pdf_text":
+            file_path = arguments.get("file_path")
+            doc_id = arguments.get("document_id")
+            if not file_path and not doc_id:
+                return _err(400, "Serve 'file_path' oppure 'document_id'.")
+            if file_path:
+                p = Path(file_path)
+                if not p.is_file():
+                    return _err(400, f"File non trovato: {p}")
+                pdf_bytes = p.read_bytes()
+                source = str(p)
+            else:
+                status, body, _h = _request("GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
+                if status != 200 or not isinstance(body, (bytes, bytearray)):
+                    return _err(status, body, hint="Impossibile scaricare il PDF da HEU.")
+                pdf_bytes = bytes(body)
+                source = f"heu:pdf:{doc_id}"
+
+            try:
+                data = _extract_text_lines_with_positions(pdf_bytes, arguments.get("pages"))
+            except ValueError as e:
+                return _err(400, str(e), hint="Errore nel parametro 'pages'.")
+            except Exception as e:
+                return _err(500, f"Errore analisi PDF: {e}")
+
+            terms = arguments.get("search_terms") or DEFAULT_SIGNATURE_KEYWORDS
+            terms_lower = [t.lower() for t in terms if t and t.strip()]
+            include_all = bool(arguments.get("include_all_lines"))
+
+            pages_payload = []
+            total_matches = 0
+            for page in data["pages"]:
+                w, h = page["width_points"], page["height_points"]
+                matches = []
+                all_lines = []
+                for line in page["lines"]:
+                    entry = {
+                        "text": line["text"][:300],
+                        "position_x": round(line["x_points"] / w * 100, 2) if w else None,
+                        "position_y": round(line["y_points"] / h * 100, 2) if h else None,
+                        "x_points": round(line["x_points"], 1),
+                        "y_points": round(line["y_points"], 1),
+                    }
+                    if include_all:
+                        all_lines.append(entry)
+                    lt = line["text"].lower()
+                    hit = [t for t in terms_lower if t in lt]
+                    if hit:
+                        matches.append({**entry, "matched_terms": hit})
+                total_matches += len(matches)
+                page_out = {
+                    "page_number": page["page_number"],
+                    "width_points": w,
+                    "height_points": h,
+                    "matches": matches,
+                }
+                if include_all:
+                    page_out["all_lines"] = all_lines
+                pages_payload.append(page_out)
+
+            note = None
+            if total_matches == 0 and not include_all:
+                note = (
+                    "Nessun match. Il PDF potrebbe essere scansionato (senza testo estraibile) "
+                    "oppure i termini cercati non compaiono: riprova con altri search_terms o "
+                    "include_all_lines=true per vedere tutte le righe."
+                )
+            return _ok({
+                "source": source,
+                "pages_total": data["pages_total"],
+                "search_terms": terms,
+                "coordinate_system": "position_x/position_y in % della pagina, origine in basso a sinistra (come i placeholder HEU)",
+                "total_matches": total_matches,
+                "pages": pages_payload,
+                "note": note,
+            })
 
         if name == "preview_pdf_template":
             doc_id = arguments["document_id"]
