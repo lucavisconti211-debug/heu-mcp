@@ -8,7 +8,8 @@ e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.
 ## [0.3.1] - 2026-08-06
 
 ### Changed
-- Il progetto è passato all'organizzazione **HEU Legal**: repository trasferito a `github.com/heulegal/heu-mcp` e namespace MCP Registry aggiornato a `io.github.heulegal/heu-mcp`. I vecchi URL GitHub reindirizzano automaticamente. Nessuna modifica funzionale: il pacchetto PyPI resta `heu-mcp`.
+- Il progetto è passato all'organizzazione **HEU Legal**: repository trasferito a `github.com/heulegal/heu-mcp`, con aggiornamento di tutti gli URL del progetto. I vecchi URL GitHub reindirizzano automaticamente. Nessuna modifica funzionale: il pacchetto PyPI resta `heu-mcp`.
+- Il namespace MCP Registry resta `io.github.Lucav21/heu-mcp` per ora: il registry concede i namespace di organizzazione solo agli **Owner** dell'org (la semplice membership non basta). Passerà a `io.github.heulegal/heu-mcp` quando il ruolo sarà disponibile; la voce del registry punta già al repository aziendale.
 
 ## [0.3.0] - 2026-08-06
 

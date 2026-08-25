@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.heulegal/heu-mcp",
+  "name": "io.github.Lucav21/heu-mcp",
   "description": "HEU Legal e-signature MCP: manage HEU documents and PDFs, prompt signers, download PDFs.",
   "repository": {
     "url": "https://github.com/heulegal/heu-mcp",

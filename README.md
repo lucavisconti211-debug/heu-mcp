@@ -1,11 +1,11 @@
-<!-- mcp-name: io.github.heulegal/heu-mcp -->
+<!-- mcp-name: io.github.Lucav21/heu-mcp -->
 
 # HEU Legal MCP Server
 
 [![PyPI](https://img.shields.io/pypi/v/heu-mcp.svg)](https://pypi.org/project/heu-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/heu-mcp.svg)](https://pypi.org/project/heu-mcp/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.heulegal%2Fheu--mcp-blue)](https://registry.modelcontextprotocol.io/v0/servers?search=heulegal/heu-mcp)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-io.github.Lucav21%2Fheu--mcp-blue)](https://registry.modelcontextprotocol.io/v0/servers?search=Lucav21/heu-mcp)
 
 MCP server (Model Context Protocol) che collega l'[API HEU Legal](https://heulegal.com) a Claude e a qualsiasi client MCP. Gestisce l'intero ciclo di vita dei documenti con firma elettronica (valida in 180+ paesi) **direttamente in conversazione**: dalla creazione all'invio in firma, dal sollecito al download del fascicolo legale completo.
 
