@@ -5,6 +5,11 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-08-06
+
+### Fixed
+- La 0.3.1 pubblicata su PyPI conteneva ancora il marker `mcp-name: io.github.heulegal/heu-mcp`, in disaccordo con il namespace effettivamente pubblicabile: il MCP Registry rifiutava la validazione di ownership. Questa release allinea marker e namespace su `io.github.Lucav21/heu-mcp`.
+
 ## [0.3.1] - 2026-08-06
 
 ### Changed
