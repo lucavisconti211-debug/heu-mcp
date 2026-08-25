@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "heu-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP Server for HEU Legal API - manage documents and PDFs for e-signature with Claude AI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,9 +42,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Lucav21/heu-mcp"
-Repository = "https://github.com/Lucav21/heu-mcp"
-Issues = "https://github.com/Lucav21/heu-mcp/issues"
+Homepage = "https://github.com/heulegal/heu-mcp"
+Repository = "https://github.com/heulegal/heu-mcp"
+Issues = "https://github.com/heulegal/heu-mcp/issues"
 "HEU Legal" = "https://heulegal.com"
 
 [project.scripts]

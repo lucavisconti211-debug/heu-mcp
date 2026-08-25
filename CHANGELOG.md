@@ -5,6 +5,11 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-06
+
+### Changed
+- Il progetto è passato all'organizzazione **HEU Legal**: repository trasferito a `github.com/heulegal/heu-mcp` e namespace MCP Registry aggiornato a `io.github.heulegal/heu-mcp`. I vecchi URL GitHub reindirizzano automaticamente. Nessuna modifica funzionale: il pacchetto PyPI resta `heu-mcp`.
+
 ## [0.3.0] - 2026-08-06
 
 ### Added
