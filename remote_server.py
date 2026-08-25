@@ -522,22 +522,32 @@ def _api_key_for_token(bearer: str) -> str | None:
 session_manager = StreamableHTTPSessionManager(app=heu.app, json_response=False, stateless=True)
 
 
-async def mcp_endpoint(scope, receive, send):
-    """Valida il bearer token, imposta la API key nel contesto e passa la richiesta all'MCP."""
-    headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-    auth = headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        await _unauthorized()(scope, receive, send)
-        return
-    api_key = await anyio.to_thread.run_sync(_api_key_for_token, auth[7:].strip())
-    if not api_key:
-        await _unauthorized("Token non valido o scaduto")(scope, receive, send)
-        return
-    tok = heu.set_api_key(api_key)
-    try:
-        await session_manager.handle_request(scope, receive, send)
-    finally:
-        heu._api_key_var.reset(tok)
+class McpEndpoint:
+    """App ASGI per l'endpoint MCP.
+
+    È una classe (e non una funzione) perché Starlette tratta le funzioni come
+    handler request/response: solo un oggetto chiamabile viene passato come app
+    ASGI, necessaria qui per lo streaming SSE.
+    """
+
+    async def __call__(self, scope, receive, send):
+        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+        auth = headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            await _unauthorized()(scope, receive, send)
+            return
+        api_key = await anyio.to_thread.run_sync(_api_key_for_token, auth[7:].strip())
+        if not api_key:
+            await _unauthorized("Token non valido o scaduto")(scope, receive, send)
+            return
+        tok = heu.set_api_key(api_key)
+        try:
+            await session_manager.handle_request(scope, receive, send)
+        finally:
+            heu._api_key_var.reset(tok)
+
+
+mcp_endpoint = McpEndpoint()
 
 
 async def healthz(request: Request):
@@ -575,6 +585,9 @@ app = Starlette(
         Route("/authorize", authorize_get, methods=["GET"]),
         Route("/authorize", authorize_post, methods=["POST"]),
         Route("/token", token, methods=["POST"]),
+        # Il path esatto va servito da una Route: un Mount da solo risponderebbe
+        # 307 verso "/mcp/", mentre i client MCP interrogano l'URL senza slash.
+        Route(MCP_PATH, mcp_endpoint, methods=["GET", "POST", "DELETE", "OPTIONS"]),
         Mount(MCP_PATH, app=mcp_endpoint),
     ],
 )

@@ -5,6 +5,12 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-08-25
+
+### Fixed
+- **Vincolo di versione su `mcp`**: la dipendenza era `mcp>=1.0.0`, quindi le installazioni nuove prendevano `mcp` 2.x, che ha rimosso i decoratori `@server.list_tools()`/`@server.call_tool()`. Il server non partiva più con `AttributeError: 'Server' object has no attribute 'list_tools'`. Ora la dipendenza è `mcp>=1.27.0,<2` (la major verificata). Chi ha installato una versione precedente in un ambiente pulito era interessato dal problema.
+- Server remoto: `POST /mcp` (senza slash finale) rispondeva `307` per il redirect automatico di Starlette sui Mount. I client MCP interrogano il path esatto, quindi ora è servito da una `Route` dedicata e risponde correttamente `401` con l'header `WWW-Authenticate`.
+
 ## [0.5.0] - 2026-08-25
 
 ### Added
