@@ -13,8 +13,10 @@ import json
 import os
 import re
 import traceback
+from contextvars import ContextVar
 from pathlib import Path
 
+import anyio
 import httpx
 from pypdf import PdfReader
 
@@ -22,7 +24,18 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent, ToolAnnotations
 
-API_KEY = os.getenv("HEU_API_KEY", "")
+# La API key è per-richiesta: in modalità stdio viene dall'ambiente, in modalità
+# remota multi-utente la imposta il layer HTTP dopo aver validato il bearer token.
+_api_key_var: ContextVar[str] = ContextVar("heu_api_key", default=os.getenv("HEU_API_KEY", ""))
+
+
+def set_api_key(key: str):
+    """Imposta la API key HEU per il contesto di esecuzione corrente."""
+    return _api_key_var.set(key or "")
+
+
+def get_api_key() -> str:
+    return _api_key_var.get()
 BASE_URL = os.getenv("HEU_BASE_URL", "https://api.heulegal.com/v1").rstrip("/")
 DOWNLOAD_DIR = Path(os.getenv("HEU_DOWNLOAD_DIR", "/tmp"))
 
@@ -34,12 +47,12 @@ app = Server("heu")
 
 def _headers():
     return {
-        "x-api-key": API_KEY,
+        "x-api-key": get_api_key(),
         "Accept": "application/json",
     }
 
 
-def _request(method: str, path: str, **kwargs):
+async def _request(method: str, path: str, **kwargs):
     """Esegue una richiesta HTTP all'API HEU e ritorna (status, body_or_text, headers).
 
     Per risposte JSON ritorna il body parsato; per binari ritorna i bytes grezzi."""
@@ -47,8 +60,8 @@ def _request(method: str, path: str, **kwargs):
     headers = kwargs.pop("headers", {})
     headers = {**_headers(), **headers}
     timeout = kwargs.pop("timeout", DEFAULT_TIMEOUT)
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.request(method, url, headers=headers, **kwargs)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.request(method, url, headers=headers, **kwargs)
         ct = resp.headers.get("content-type", "")
         if "application/json" in ct:
             try:
@@ -82,7 +95,7 @@ def _err(status: int, body, hint: str | None = None) -> list[TextContent]:
 
 
 def _check_config() -> str | None:
-    if not API_KEY:
+    if not get_api_key():
         return "HEU_API_KEY non configurata. Imposta la variabile d'ambiente con la tua API key (Profile > API Keys nella UI HEU, richiede subscription Enterprise)."
     return None
 
@@ -104,9 +117,9 @@ def _save_binary(content: bytes, output_path: str | None, default_name: str) -> 
     return out
 
 
-def _download_binary_to_disk(path: str, output_path: str | None, default_name: str, what: str) -> list[TextContent]:
+async def _download_binary_to_disk(path: str, output_path: str | None, default_name: str, what: str) -> list[TextContent]:
     """GET binario dall'API e salvataggio su disco; ritorna path e dimensione."""
-    status, body, headers = _request("GET", path, timeout=DOWNLOAD_TIMEOUT)
+    status, body, headers = await _request("GET", path, timeout=DOWNLOAD_TIMEOUT)
     if status != 200:
         return _err(status, body if not isinstance(body, (bytes, bytearray)) else body[:200].decode(errors="replace"))
     if not isinstance(body, (bytes, bytearray)):
@@ -117,6 +130,12 @@ def _download_binary_to_disk(path: str, output_path: str | None, default_name: s
         "size_bytes": len(body),
         "content_disposition": headers.get("content-disposition"),
     })
+
+
+async def _in_thread(fn, *args):
+    """Esegue lavoro CPU-bound (parsing PDF) in un worker thread, per non bloccare
+    l'event loop quando il server gira in modalità remota multi-utente."""
+    return await anyio.to_thread.run_sync(fn, *args)
 
 
 DEFAULT_MAX_PAGES = 100
@@ -1157,9 +1176,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
     try:
         if name == "get_heu_health":
-            if not API_KEY:
+            if not get_api_key():
                 return [TextContent(type="text", text="HEU_API_KEY non configurata.")]
-            status, body, _ = _request("GET", "/health")
+            status, body, _ = await _request("GET", "/health")
             return _ok(body) if status == 200 else _err(status, body)
 
         # ---------- DOCUMENTS ----------
@@ -1170,17 +1189,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     params[k] = arguments[k]
             if "have_editors_signed" in arguments and arguments["have_editors_signed"] is not None:
                 params["have_editors_signed"] = "true" if arguments["have_editors_signed"] else "false"
-            status, body, _ = _request("GET", "/documents", params=params)
+            status, body, _ = await _request("GET", "/documents", params=params)
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "get_heu_document":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("GET", f"/documents/{doc_id}")
+            status, body, _ = await _request("GET", f"/documents/{doc_id}")
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "list_heu_document_placeholders":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("GET", f"/documents/{doc_id}/placeholders")
+            status, body, _ = await _request("GET", f"/documents/{doc_id}/placeholders")
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "create_heu_document":
@@ -1201,12 +1220,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 payload["document_type"] = arguments["document_type"]
             if "placeholders" in arguments and arguments["placeholders"]:
                 payload["placeholders"] = arguments["placeholders"]
-            status, body, _ = _request("POST", "/documents", json=payload)
+            status, body, _ = await _request("POST", "/documents", json=payload)
             return _ok(body) if status in (200, 201) else _err(status, body)
 
         if name == "prompt_heu_document_signature":
             doc_id = arguments["document_id"]
-            status, body, headers = _request("POST", f"/documents/{doc_id}/signatures/prompts")
+            status, body, headers = await _request("POST", f"/documents/{doc_id}/signatures/prompts")
             if status in (200, 201):
                 return _ok(body)
             hint = None
@@ -1220,7 +1239,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             include_text = bool(arguments.get("include_text"))
 
             # 1) Document metadata (registered parties: members, owner, editors, status)
-            meta_status, meta_body, _h = _request("GET", f"/documents/{doc_id}")
+            meta_status, meta_body, _h = await _request("GET", f"/documents/{doc_id}")
             registered_parties = []
             doc_metadata = None
             if meta_status == 200 and isinstance(meta_body, dict):
@@ -1245,17 +1264,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         registered_parties.append({"source": "editors", "email": editor, "role": "editor"})
 
             # 2) Document body text
-            status, body, _h = _request("POST", f"/documents/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
+            status, body, _h = await _request("POST", f"/documents/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
             if status != 200 or not isinstance(body, (bytes, bytearray)):
                 return _err(status, body, hint="Impossibile scaricare il PDF per l'estrazione testo.")
             try:
-                pdf_result = _extract_pdf_text(bytes(body), arguments.get("pages"))
+                pdf_result = await _in_thread(_extract_pdf_text, bytes(body), arguments.get("pages"))
             except ValueError as e:
                 return _err(400, str(e), hint="Errore nel parametro 'pages'.")
             except Exception as e:
                 return _err(500, f"Errore estrazione testo: {e}")
 
-            extracted = _extract_parties_from_text(pdf_result["text"])
+            extracted = await _in_thread(_extract_parties_from_text, pdf_result["text"])
 
             payload = {
                 "document_id": doc_id,
@@ -1277,7 +1296,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             # 1) PDF metadata + signers
             doc_metadata = None
             registered_parties = []
-            meta_status, meta_body, _h = _request("GET", f"/pdfs/{doc_id}")
+            meta_status, meta_body, _h = await _request("GET", f"/pdfs/{doc_id}")
             if meta_status == 200 and isinstance(meta_body, dict):
                 data = meta_body.get("data", meta_body) or {}
                 doc_metadata = {
@@ -1288,7 +1307,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "updated_at": data.get("updated_at"),
                 }
 
-            sgn_status, sgn_body, _h = _request("GET", f"/pdfs/{doc_id}/signers")
+            sgn_status, sgn_body, _h = await _request("GET", f"/pdfs/{doc_id}/signers")
             if sgn_status == 200 and isinstance(sgn_body, dict):
                 for s in (sgn_body.get("data") or []):
                     registered_parties.append({
@@ -1301,14 +1320,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     })
 
             # 2) PDF body text via the native pdfs/{id}/download endpoint
-            status, body, _h = _request("GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
+            status, body, _h = await _request("GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
             extracted = None
             text_warning = None
             pdf_result = None
             if status == 200 and isinstance(body, (bytes, bytearray)):
                 try:
-                    pdf_result = _extract_pdf_text(bytes(body), arguments.get("pages"))
-                    extracted = _extract_parties_from_text(pdf_result["text"])
+                    pdf_result = await _in_thread(_extract_pdf_text, bytes(body), arguments.get("pages"))
+                    extracted = await _in_thread(_extract_parties_from_text, pdf_result["text"])
                 except ValueError as e:
                     return _err(400, str(e), hint="Errore nel parametro 'pages'.")
                 except Exception as e:
@@ -1344,13 +1363,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             kwargs = {"timeout": DOWNLOAD_TIMEOUT}
             if payload:
                 kwargs["json"] = payload
-            status, body, _headers = _request("POST", f"/documents/{doc_id}/download", **kwargs)
+            status, body, _headers = await _request("POST", f"/documents/{doc_id}/download", **kwargs)
             if status != 200:
                 return _err(status, body)
             if not isinstance(body, (bytes, bytearray)):
                 return _err(status, body, hint="Atteso PDF binario, ricevuto altro contenuto.")
             try:
-                result = _extract_pdf_text(bytes(body), arguments.get("pages"))
+                result = await _in_thread(_extract_pdf_text, bytes(body), arguments.get("pages"))
             except ValueError as e:
                 return _err(400, str(e), hint="Errore nel parametro 'pages'.")
             except Exception as e:
@@ -1369,7 +1388,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "read_pdf_document":
             doc_id = arguments["document_id"]
-            status, body, _headers = _request(
+            status, body, _headers = await _request(
                 "GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT
             )
             if status != 200:
@@ -1377,7 +1396,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if not isinstance(body, (bytes, bytearray)):
                 return _err(status, body, hint="Atteso PDF binario, ricevuto altro contenuto.")
             try:
-                result = _extract_pdf_text(bytes(body), arguments.get("pages"))
+                result = await _in_thread(_extract_pdf_text, bytes(body), arguments.get("pages"))
             except ValueError as e:
                 return _err(400, str(e), hint="Errore nel parametro 'pages'.")
             except Exception as e:
@@ -1403,7 +1422,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             kwargs = {"timeout": DOWNLOAD_TIMEOUT}
             if payload:
                 kwargs["json"] = payload
-            status, body, headers = _request("POST", f"/documents/{doc_id}/download", **kwargs)
+            status, body, headers = await _request("POST", f"/documents/{doc_id}/download", **kwargs)
             if status != 200:
                 return _err(status, body)
             if not isinstance(body, (bytes, bytearray)):
@@ -1426,28 +1445,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             params = {"type": arguments["type"]}
             if "sort" in arguments and arguments["sort"]:
                 params["sort"] = arguments["sort"]
-            status, body, _ = _request("GET", "/pdfs", params=params)
+            status, body, _ = await _request("GET", "/pdfs", params=params)
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "get_pdf_document":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("GET", f"/pdfs/{doc_id}")
+            status, body, _ = await _request("GET", f"/pdfs/{doc_id}")
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "list_pdf_document_signers":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("GET", f"/pdfs/{doc_id}/signers")
+            status, body, _ = await _request("GET", f"/pdfs/{doc_id}/signers")
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "list_pdf_document_signer_placeholders":
             doc_id = arguments["document_id"]
             signer_id = arguments["signer_id"]
-            status, body, _ = _request("GET", f"/pdfs/{doc_id}/signers/{signer_id}/placeholders")
+            status, body, _ = await _request("GET", f"/pdfs/{doc_id}/signers/{signer_id}/placeholders")
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "list_pdf_document_placeholders":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("GET", f"/pdfs/{doc_id}/placeholders")
+            status, body, _ = await _request("GET", f"/pdfs/{doc_id}/placeholders")
             return _ok(body) if status == 200 else _err(status, body)
 
         if name == "create_pdf_document":
@@ -1465,7 +1484,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 payload["signature_type"] = arguments["signature_type"]
             if "placeholders" in arguments and arguments["placeholders"]:
                 payload["placeholders"] = arguments["placeholders"]
-            status, body, _ = _request("POST", "/pdfs", json=payload)
+            status, body, _ = await _request("POST", "/pdfs", json=payload)
             if status in (200, 201):
                 return _ok(body)
             hint = None
@@ -1475,12 +1494,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "prompt_pdf_document_signature":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("POST", f"/pdfs/{doc_id}/signatures/prompts")
+            status, body, _ = await _request("POST", f"/pdfs/{doc_id}/signatures/prompts")
             return _ok(body) if status in (200, 201) else _err(status, body)
 
         if name == "download_pdf_document":
             doc_id = arguments["document_id"]
-            return _download_binary_to_disk(
+            return await _download_binary_to_disk(
                 f"/pdfs/{doc_id}/download",
                 arguments.get("output_path"),
                 f"heu_pdf_{_safe_filename(doc_id)}.pdf",
@@ -1489,7 +1508,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "download_pdf_audit_trail":
             doc_id = arguments["document_id"]
-            return _download_binary_to_disk(
+            return await _download_binary_to_disk(
                 f"/pdfs/{doc_id}/audit-trail",
                 arguments.get("output_path"),
                 f"heu_pdf_{_safe_filename(doc_id)}_audit_trail.pdf",
@@ -1498,7 +1517,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "download_pdf_bundle":
             doc_id = arguments["document_id"]
-            return _download_binary_to_disk(
+            return await _download_binary_to_disk(
                 f"/pdfs/{doc_id}/bundle",
                 arguments.get("output_path"),
                 f"heu_pdf_{_safe_filename(doc_id)}_bundle.zip",
@@ -1516,7 +1535,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "signers": arguments["signers"],
                 "placeholders": arguments["placeholders"],
             }
-            status, body, _ = _request(
+            status, body, _ = await _request(
                 "POST",
                 "/pdfs/templates",
                 files={"file": (file_path.name, file_path.read_bytes(), "application/pdf")},
@@ -1547,7 +1566,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             }
             if "signature_type" in arguments and arguments["signature_type"]:
                 data_payload["signature_type"] = arguments["signature_type"]
-            status, body, _ = _request(
+            status, body, _ = await _request(
                 "POST",
                 "/pdfs/documents",
                 files={"file": (file_path.name, file_path.read_bytes(), "application/pdf")},
@@ -1575,14 +1594,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 pdf_bytes = p.read_bytes()
                 source = str(p)
             else:
-                status, body, _h = _request("GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
+                status, body, _h = await _request("GET", f"/pdfs/{doc_id}/download", timeout=DOWNLOAD_TIMEOUT)
                 if status != 200 or not isinstance(body, (bytes, bytearray)):
                     return _err(status, body, hint="Impossibile scaricare il PDF da HEU.")
                 pdf_bytes = bytes(body)
                 source = f"heu:pdf:{doc_id}"
 
             try:
-                data = _extract_text_lines_with_positions(pdf_bytes, arguments.get("pages"))
+                data = await _in_thread(_extract_text_lines_with_positions, pdf_bytes, arguments.get("pages"))
             except ValueError as e:
                 return _err(400, str(e), hint="Errore nel parametro 'pages'.")
             except Exception as e:
@@ -1642,7 +1661,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "preview_pdf_template":
             doc_id = arguments["document_id"]
-            return _download_binary_to_disk(
+            return await _download_binary_to_disk(
                 f"/pdfs/templates/{doc_id}/preview",
                 arguments.get("output_path"),
                 f"heu_template_{_safe_filename(doc_id)}_preview.pdf",
@@ -1656,7 +1675,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 payload["documentName"] = arguments["document_name"]
             if "placeholders" in arguments and arguments["placeholders"] is not None:
                 payload["placeholders"] = arguments["placeholders"]
-            status, body, _ = _request("PUT", f"/pdfs/templates/{doc_id}", json=payload)
+            status, body, _ = await _request("PUT", f"/pdfs/templates/{doc_id}", json=payload)
             if status == 200:
                 return _ok(body)
             hint = None
@@ -1666,14 +1685,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
         if name == "delete_pdf_template":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("DELETE", f"/pdfs/templates/{doc_id}")
+            status, body, _ = await _request("DELETE", f"/pdfs/templates/{doc_id}")
             if status == 204:
                 return _ok({"deleted": True, "template_id": doc_id})
             return _err(status, body)
 
         if name == "cancel_pdf_document":
             doc_id = arguments["document_id"]
-            status, body, _ = _request("DELETE", f"/pdfs/documents/{doc_id}")
+            status, body, _ = await _request("DELETE", f"/pdfs/documents/{doc_id}")
             if status == 204:
                 return _ok({"cancelled": True, "document_id": doc_id, "note": "Richiesta di firma annullata: i firmatari in attesa non possono più firmare."})
             hint = None

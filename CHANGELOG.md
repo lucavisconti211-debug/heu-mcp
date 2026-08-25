@@ -5,6 +5,21 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-25
+
+### Added
+- **Server remoto multi-utente** (`remote_server.py`, avviabile con `heu-mcp-remote`): espone i 28 tool via Streamable HTTP con autenticazione OAuth 2.1, così gli utenti si collegano senza installare nulla in locale.
+  - Authorization server completo: discovery RFC 9728/RFC 8414, Dynamic Client Registration (RFC 7591), Client ID Metadata Document, PKCE S256 obbligatorio, `401` con `WWW-Authenticate: resource_metadata=...`.
+  - Redirect URI validati con match esatto ed eccezione loopback port-agnostica (RFC 8252), come richiesto da Claude Code.
+  - Refresh token con rotazione; il riuso di un token già ruotato revoca l'intera sessione.
+  - Le API key HEU degli utenti sono cifrate a riposo (Fernet); i token sono salvati solo come hash SHA-256.
+  - Pagina di consenso con informativa privacy e validazione della API key contro l'API HEU prima di emettere il codice.
+- `Dockerfile` e `fly.toml` per il deploy, ed extra `pip install "heu-mcp[remote]"`.
+
+### Changed
+- La API key non è più una variabile globale ma un `ContextVar` per-richiesta: in stdio arriva dall'ambiente, in modalità remota dal bearer token dell'utente. Questo rende il server sicuro in scenari multi-utente.
+- Tutte le chiamate HTTP verso l'API HEU sono ora asincrone (`httpx.AsyncClient`) e il parsing PDF gira su threadpool: una richiesta lenta non blocca più le altre.
+
 ## [0.4.0] - 2026-08-25
 
 ### Added

@@ -1,0 +1,5 @@
+# Dipendenze aggiuntive per il server remoto (remote_server.py).
+# Non servono a chi usa il server in modalità stdio locale.
+cryptography>=42.0.0
+starlette>=0.37.0
+uvicorn[standard]>=0.30.0

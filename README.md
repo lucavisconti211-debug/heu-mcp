@@ -102,6 +102,58 @@ Riavvia Claude Desktop dopo la modifica.
 claude mcp add heu heu-mcp -e HEU_API_KEY=la_tua_api_key_qui
 ```
 
+---
+
+## Server remoto (multi-utente)
+
+Oltre alla modalità locale (stdio) descritta sopra, il progetto include un **server remoto** che espone gli stessi 28 tool via HTTPS, così gli utenti si collegano senza installare nulla: inseriscono la propria API key HEU una volta, in un flusso OAuth.
+
+**Caratteristiche:**
+- Transport **Streamable HTTP**, autenticazione **OAuth 2.1** con PKCE S256, Dynamic Client Registration e Client ID Metadata Document
+- **Multi-utente**: ogni connessione usa la API key del proprio utente, conservata cifrata (Fernet) e mai in chiaro nel database
+- Refresh token con **rotazione** e revoca automatica della sessione in caso di riuso sospetto
+- I/O di rete asincrono e parsing PDF su threadpool: una richiesta lenta non blocca gli altri utenti
+
+### Avvio locale
+
+```bash
+pip install -e ".[remote]"
+export HEU_MCP_SECRET_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+export PUBLIC_URL="http://localhost:8080"
+export HEU_MCP_DB="./heu-mcp.db"
+heu-mcp-remote
+```
+
+### Deploy su Fly.io
+
+```bash
+fly launch --no-deploy
+fly volumes create heu_data --size 1
+fly secrets set HEU_MCP_SECRET_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+fly secrets set PUBLIC_URL="https://<nome-app>.fly.dev"
+fly deploy
+```
+
+### Variabili d'ambiente del server remoto
+
+| Variabile | Descrizione | Default |
+|---|---|---|
+| `HEU_MCP_SECRET_KEY` | Chiave Fernet per cifrare le API key degli utenti (**richiesta**) | — |
+| `PUBLIC_URL` | URL pubblico del servizio, senza slash finale (**richiesta in produzione**) | `http://localhost:8080` |
+| `MCP_PATH` | Path dell'endpoint MCP | `/mcp` |
+| `HEU_MCP_DB` | Percorso del database SQLite | `/data/heu-mcp.db` |
+| `ACCESS_TOKEN_TTL` / `REFRESH_TOKEN_TTL` | Durata token in secondi | 1 ora / 60 giorni |
+
+### Endpoint esposti
+
+| Endpoint | Scopo |
+|---|---|
+| `/mcp` | Endpoint MCP (richiede bearer token) |
+| `/.well-known/oauth-protected-resource` | Metadati risorsa protetta (RFC 9728) |
+| `/.well-known/oauth-authorization-server` | Metadati authorization server (RFC 8414) |
+| `/register` · `/authorize` · `/token` | Flusso OAuth 2.1 |
+| `/healthz` | Liveness probe |
+
 ### Variabili d'ambiente
 
 | Variabile | Descrizione | Default |

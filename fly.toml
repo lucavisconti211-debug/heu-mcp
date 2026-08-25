@@ -1,0 +1,38 @@
+# Deploy del server MCP remoto HEU su Fly.io.
+#   fly launch --no-deploy      (una tantum, crea l'app)
+#   fly volumes create heu_data --size 1
+#   fly secrets set HEU_MCP_SECRET_KEY=... PUBLIC_URL=https://<app>.fly.dev
+#   fly deploy
+app = "heu-mcp"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MCP_PATH = "/mcp"
+  HEU_BASE_URL = "https://api.heulegal.com/v1"
+
+[mounts]
+  source = "heu_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Almeno una macchina sempre attiva: il flusso OAuth di Claude ha timeout stretti
+  # (10s su discovery/registration/token) e un cold start li supererebbe.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
