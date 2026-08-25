@@ -5,6 +5,11 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-08-25
+
+### Fixed
+- **Server remoto: supporto CIMD mancante.** I metadati dichiaravano `client_id_metadata_document_supported: true`, quindi Claude sceglieva il flusso Client ID Metadata Document e inviava un URL come `client_id`; `/authorize` lo cercava però solo fra i client registrati via DCR e rispondeva `invalid_client: client_id sconosciuto`, rendendo impossibile collegare il connettore. Ora il server risolve i `client_id` in forma di URL scaricando e validando il documento di metadati (il campo `client_id` del documento deve coincidere con l'URL da cui è servito), con cache di un'ora. Il fetch accetta solo `https` e blocca host locali e `.local` come protezione da SSRF. Il flusso DCR continua a funzionare invariato.
+
 ## [0.5.1] - 2026-08-25
 
 ### Fixed

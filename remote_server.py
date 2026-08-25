@@ -263,6 +263,64 @@ def _lookup_client(client_id: str):
     return row
 
 
+# Client ID Metadata Document: il client_id è un URL https che serve il proprio
+# documento di metadati, invece di essere registrato tramite DCR.
+CIMD_TTL = 3600
+_cimd_cache: dict[str, tuple[dict, float]] = {}
+
+
+async def _fetch_cimd(client_id: str) -> dict | None:
+    """Scarica e valida un Client ID Metadata Document."""
+    cached = _cimd_cache.get(client_id)
+    if cached and (time.time() - cached[1]) < CIMD_TTL:
+        return cached[0]
+
+    parsed = urlparse(client_id)
+    # Solo https, e mai verso host locali/privati (protezione SSRF).
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    host = parsed.hostname.lower()
+    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local"):
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=False) as c:
+            resp = await c.get(client_id, headers={"Accept": "application/json"})
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        doc = resp.json()
+    except Exception:
+        return None
+    # Il documento deve dichiarare come proprio client_id la stessa URL da cui è servito.
+    if not isinstance(doc, dict) or doc.get("client_id") != client_id:
+        return None
+    if not isinstance(doc.get("redirect_uris"), list) or not doc["redirect_uris"]:
+        return None
+
+    _cimd_cache[client_id] = (doc, time.time())
+    return doc
+
+
+async def _resolve_client(client_id: str) -> tuple[str, list[str]] | None:
+    """Risolve un client sia registrato via DCR sia identificato via CIMD.
+
+    Ritorna (nome visualizzato, redirect_uris ammessi) oppure None."""
+    if not client_id:
+        return None
+    if client_id.startswith("https://"):
+        doc = await _fetch_cimd(client_id)
+        if not doc:
+            return None
+        return (str(doc.get("client_name") or "Un'applicazione")[:200], doc["redirect_uris"])
+    row = _lookup_client(client_id)
+    if not row:
+        return None
+    return (row["client_name"] or "Un'applicazione", json.loads(row["redirect_uris"]))
+
+
 CONSENT_PAGE = """<!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -332,10 +390,11 @@ async def authorize_get(request: Request):
     if not challenge:
         return _oauth_error("invalid_request", "code_challenge mancante.")
 
-    row = _lookup_client(client_id)
-    if not row:
-        return _oauth_error("invalid_client", "client_id sconosciuto.")
-    if not _redirect_uri_allowed(json.loads(row["redirect_uris"]), redirect_uri):
+    resolved = await _resolve_client(client_id)
+    if not resolved:
+        return _oauth_error("invalid_client", "client_id sconosciuto o documento CIMD non valido.")
+    client_name, allowed_uris = resolved
+    if not _redirect_uri_allowed(allowed_uris, redirect_uri):
         return _oauth_error("invalid_request", "redirect_uri non registrato per questo client.")
 
     params = {
@@ -345,7 +404,7 @@ async def authorize_get(request: Request):
         "state": q.get("state", ""),
         "scope": q.get("scope", "heu:read heu:write"),
     }
-    return _render_consent(params, row["client_name"] or "Un'applicazione")
+    return _render_consent(params, client_name)
 
 
 async def authorize_post(request: Request):
@@ -357,10 +416,11 @@ async def authorize_post(request: Request):
     scope = str(form.get("scope", "heu:read heu:write"))
     api_key = str(form.get("api_key", "")).strip()
 
-    row = _lookup_client(client_id)
-    if not row or not challenge:
+    resolved = await _resolve_client(client_id)
+    if not resolved or not challenge:
         return _oauth_error("invalid_client", "Sessione di autorizzazione non valida.")
-    if not _redirect_uri_allowed(json.loads(row["redirect_uris"]), redirect_uri):
+    client_name, allowed_uris = resolved
+    if not _redirect_uri_allowed(allowed_uris, redirect_uri):
         return _oauth_error("invalid_request", "redirect_uri non registrato per questo client.")
 
     params = {
@@ -371,11 +431,11 @@ async def authorize_post(request: Request):
         "scope": scope,
     }
     if not api_key:
-        return _render_consent(params, row["client_name"] or "", "Inserisci la tua API key HEU.")
+        return _render_consent(params, client_name, "Inserisci la tua API key HEU.")
 
     ok, message = await _validate_heu_key(api_key)
     if not ok:
-        return _render_consent(params, row["client_name"] or "", message)
+        return _render_consent(params, client_name, message)
 
     code = secrets.token_urlsafe(32)
     with _db() as c:
