@@ -5,6 +5,11 @@ Tutte le modifiche significative a questo progetto vengono documentate in questo
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-25
+
+### Added
+- Annotazioni MCP su tutti i 28 tool (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`): 19 di sola lettura, 6 di scrittura, 3 distruttivi (`update_pdf_template`, `delete_pdf_template`, `cancel_pdf_document`). I client MCP possono così mostrare nomi leggibili e avvisare prima delle operazioni che modificano o cancellano dati. Requisito obbligatorio per la submission alla Connectors Directory di Anthropic.
+
 ## [0.3.2] - 2026-08-06
 
 ### Fixed

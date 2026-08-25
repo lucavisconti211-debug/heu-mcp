@@ -20,7 +20,7 @@ from pypdf import PdfReader
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, ToolAnnotations
 
 API_KEY = os.getenv("HEU_API_KEY", "")
 BASE_URL = os.getenv("HEU_BASE_URL", "https://api.heulegal.com/v1").rstrip("/")
@@ -432,6 +432,13 @@ async def list_tools():
             name="get_heu_health",
             description="Health check API HEU. Ritorna { message: 'ok', status: 200 } se operativa.",
             inputSchema={"type": "object", "properties": {}},
+            annotations=ToolAnnotations(
+                title="Health Check",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         # ---------- DOCUMENTS (native HEU) ----------
         Tool(
@@ -466,6 +473,13 @@ async def list_tools():
                     "have_editors_signed": {"type": "boolean", "description": "Filtra per: tutti gli editor hanno firmato"},
                 },
             },
+            annotations=ToolAnnotations(
+                title="List HEU Documents",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="get_heu_document",
@@ -477,6 +491,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Get HEU Document",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="list_heu_document_placeholders",
@@ -488,6 +509,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="List HEU Document Placeholders",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="create_heu_document",
@@ -512,6 +540,13 @@ async def list_tools():
                 },
                 "required": ["source_document_id", "email_subject", "email_text", "email_to"],
             },
+            annotations=ToolAnnotations(
+                title="Create and Share HEU Document",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="prompt_heu_document_signature",
@@ -527,6 +562,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Send HEU Signature Reminder",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="extract_heu_document_parties",
@@ -552,6 +594,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Extract HEU Document Parties",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="read_heu_document",
@@ -584,6 +633,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Read HEU Document Text",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="download_heu_document_pdf",
@@ -611,6 +667,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Download HEU Document PDF",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         # ---------- PDFs (uploaded) ----------
         Tool(
@@ -624,6 +687,13 @@ async def list_tools():
                 },
                 "required": ["type"],
             },
+            annotations=ToolAnnotations(
+                title="List PDF Documents",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="get_pdf_document",
@@ -635,6 +705,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Get PDF Document",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="list_pdf_document_signers",
@@ -646,6 +723,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="List PDF Signers",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="list_pdf_document_signer_placeholders",
@@ -658,6 +742,13 @@ async def list_tools():
                 },
                 "required": ["document_id", "signer_id"],
             },
+            annotations=ToolAnnotations(
+                title="List PDF Signer Placeholders",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="list_pdf_document_placeholders",
@@ -669,6 +760,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="List PDF Placeholders",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="create_pdf_document",
@@ -699,6 +797,13 @@ async def list_tools():
                 },
                 "required": ["source_document_id", "email_subject", "email_body", "signers"],
             },
+            annotations=ToolAnnotations(
+                title="Create and Send PDF for Signature",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="extract_pdf_document_parties",
@@ -723,6 +828,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Extract PDF Document Parties",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="read_pdf_document",
@@ -743,6 +855,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Read PDF Document Text",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="prompt_pdf_document_signature",
@@ -757,6 +876,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Send PDF Signature Reminder",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="download_pdf_document",
@@ -772,6 +898,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Download PDF Document",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="download_pdf_audit_trail",
@@ -787,6 +920,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Download PDF Audit Trail",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="download_pdf_bundle",
@@ -802,6 +942,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Download PDF Legal Bundle",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="create_pdf_template",
@@ -822,6 +969,13 @@ async def list_tools():
                 },
                 "required": ["file_path", "document_name", "signers", "placeholders"],
             },
+            annotations=ToolAnnotations(
+                title="Create PDF Template from File",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="create_pdf_document_from_upload",
@@ -849,6 +1003,13 @@ async def list_tools():
                 },
                 "required": ["file_path", "document_name", "email_subject", "email_body", "signers", "placeholders"],
             },
+            annotations=ToolAnnotations(
+                title="Send PDF for Signature from File",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="locate_pdf_text",
@@ -882,6 +1043,13 @@ async def list_tools():
                     },
                 },
             },
+            annotations=ToolAnnotations(
+                title="Locate Text Positions in PDF",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="preview_pdf_template",
@@ -899,6 +1067,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Preview PDF Template Layout",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="update_pdf_template",
@@ -918,6 +1093,13 @@ async def list_tools():
                 },
                 "required": ["document_id", "signers"],
             },
+            annotations=ToolAnnotations(
+                title="Update PDF Template",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="delete_pdf_template",
@@ -933,6 +1115,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Delete PDF Template",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="cancel_pdf_document",
@@ -949,6 +1138,13 @@ async def list_tools():
                 },
                 "required": ["document_id"],
             },
+            annotations=ToolAnnotations(
+                title="Cancel PDF Signature Request",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
         ),
     ]
 
